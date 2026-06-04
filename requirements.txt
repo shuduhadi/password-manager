@@ -1,0 +1,13 @@
+# Password manager — V1 dependencies
+# Install: pip install -r requirements.txt
+
+# Core
+cryptography==46.0.6   # Fernet encryption + PBKDF2 key derivation
+bcrypt==5.0.0          # Master password hashing
+
+# Utility
+pyperclip==1.11.0      # Copy to clipboard (cross-platform)
+
+# Testing
+pytest==9.0.3          # Test runner
+pytest-cov==7.1.0      # Coverage reporting
