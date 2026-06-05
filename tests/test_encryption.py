@@ -1,6 +1,7 @@
 import pytest
 import bcrypt
-from encryption import hash_master_password, verify_master_password, generate_salt, derive_key
+from encryption import hash_master_password, verify_master_password, generate_salt, derive_key, encrypt_password, decrypt_password
+from cryptography.fernet import InvalidToken
 
 def test_hash_returns_bytes():
     result = hash_master_password("mypassword")
@@ -50,3 +51,27 @@ def test_key_is_44_characters():
     salt = generate_salt()
     key = derive_key("mypassowrd", salt)
     assert len(key) == 44
+
+def test_encrypt_decrypt():
+    salt = generate_salt()
+    key = derive_key("mypassword", salt)
+    encrypted = encrypt_password("secret", key)
+    decrypted= decrypt_password(encrypted, key)
+    assert decrypted == "secret"
+
+def test_wrong_key_raises():
+    salt1 = generate_salt()
+    salt2 = generate_salt()
+    
+    key1 = derive_key("password", salt1)
+    key2 = derive_key("password", salt2)
+
+    encrypted = encrypt_password("secret", key1)
+    with pytest.raises(InvalidToken):
+        decrypt_password(encrypted, key2)
+
+def test_fernet_token_format():
+    salt = generate_salt()
+    key = derive_key("mypassword", salt)
+    encrypted = encrypt_password("secret", key)
+    assert encrypted.startswith("gAAAAA")
