@@ -46,3 +46,7 @@ python main.py
 - [ ] Export / import vault
 - [ ] PyQt6 UI upgrade
 - [ ] Browser extension
+
+## Repository Verification
+
+Verification Code: **WTC-HJQJZEZ6**
