@@ -11,3 +11,6 @@ pyperclip==1.11.0      # Copy to clipboard (cross-platform)
 # Testing
 pytest==9.0.3          # Test runner
 pytest-cov==7.1.0      # Coverage reporting
+
+# GUI
+customtkinter==5.2.2
