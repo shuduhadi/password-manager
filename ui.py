@@ -34,6 +34,10 @@ ERROR_RED = "#ff4d6d"
 WHITE = "#ffffff"
 BLACK = "#08080b"
 
+# Auto-lock: how long the dashboard can sit idle before it locks itself
+# and clears the derived key from memory. In milliseconds.
+AUTO_LOCK_MS = 10 * 1000
+
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -393,6 +397,10 @@ class DashboardWindow:
         self._reveal_jobs = {}
         self._copy_reset_jobs = {}
 
+        # Auto-lock state
+        self.locked_out = False  # True once auto-lock or manual lock has fired
+        self._inactivity_job = None
+
         self.window = ctk.CTk()
         self.window.title("PyVault")
         self.window.geometry(f"{self.WIDTH}x{self.HEIGHT}")
@@ -406,6 +414,11 @@ class DashboardWindow:
         self._create_status_bar()
 
         self.window.protocol("WM_DELETE_WINDOW", self._exit)
+
+        # Any keypress or click resets the inactivity clock
+        self.window.bind_all("<Any-KeyPress>", self._on_activity, add="+")
+        self.window.bind_all("<Any-ButtonPress>", self._on_activity, add="+")
+        self._reset_inactivity_timer()
 
         self._refresh_list()
 
@@ -473,6 +486,15 @@ class DashboardWindow:
 
         self._create_sidebar_item(icon="🛡", text="Security", active=False)
         self._create_sidebar_item(icon="⚙", text="Settings", active=False)
+
+        ctk.CTkButton(
+            self.sidebar, text="🔒  Lock now", command=self._lock_vault,
+            height=36, corner_radius=7,
+            fg_color="transparent", hover_color="#1b111a",
+            text_color=TEXT_SECONDARY, border_width=1, border_color=BORDER_DIM,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            anchor="w",
+        ).pack(side="bottom", fill="x", padx=12, pady=16)
 
     def _create_sidebar_item(self, icon, text, active=False):
         frame = ctk.CTkFrame(
@@ -771,6 +793,58 @@ class DashboardWindow:
 
     def _show_toast(self, title: str, message: str, error: bool = False):
         ConfirmDialog.show(self.window, title, message, kind="error" if error else "info")
+
+    def _on_activity(self, event=None):
+        """Any keypress or click resets the inactivity clock."""
+        self._reset_inactivity_timer()
+
+    def _reset_inactivity_timer(self):
+        if self._inactivity_job is not None:
+            try:
+                self.window.after_cancel(self._inactivity_job)
+            except Exception:
+                pass
+        self._inactivity_job = self.window.after(AUTO_LOCK_MS, self._auto_lock)
+
+    def _auto_lock(self):
+        """Called when the inactivity timer fires — locks the vault silently."""
+        self._lock_vault()
+
+    def _lock_vault(self):
+        """Save the vault, wipe the key from memory, and close the dashboard.
+
+        gui_main.py's run loop sees locked_out=True and re-shows the
+        login/unlock screen instead of exiting the app entirely.
+        """
+        if self._inactivity_job is not None:
+            try:
+                self.window.after_cancel(self._inactivity_job)
+            except Exception:
+                pass
+            self._inactivity_job = None
+
+        # Cancel any pending reveal/copy timers so they don't fire on a dead window
+        for job in list(self._reveal_jobs.values()):
+            try:
+                self.window.after_cancel(job)
+            except Exception:
+                pass
+        self._reveal_jobs.clear()
+
+        for job in list(self._copy_reset_jobs.values()):
+            try:
+                self.window.after_cancel(job)
+            except Exception:
+                pass
+        self._copy_reset_jobs.clear()
+
+        save_vault(self.vault, self.vault_path)
+
+        # Wipe the derived key from memory — this is the actual security boundary
+        self.key = None
+        self.locked_out = True
+
+        self.window.destroy()
 
     def _exit(self):
         save_vault(self.vault, self.vault_path)
