@@ -58,7 +58,6 @@ class ConfirmDialog:
         self.window.resizable(False, False)
         self.window.configure(fg_color=BG_DARK)
         self.window.transient(parent)
-        self.window.grab_set()
         self.window.protocol("WM_DELETE_WINDOW", self._on_no)
 
         accent_color = ERROR_RED if kind == "error" else HOT_PINK
@@ -125,6 +124,7 @@ class ConfirmDialog:
 
         self.window.update_idletasks()
         self._center_on_parent(parent)
+        self.window.grab_set()
 
     def _center_on_parent(self, parent):
         self.window.update_idletasks()
@@ -796,7 +796,6 @@ class GeneratorDialog:
         self.window.resizable(False, False)
         self.window.configure(fg_color=BG_DARK)
         self.window.transient(parent)
-        self.window.grab_set()
 
         ctk.CTkFrame(self.window, height=2, corner_radius=0, fg_color=HOT_PINK).pack(fill="x", side="top")
 
@@ -908,6 +907,8 @@ class GeneratorDialog:
             border_width=0,
         ).pack(side="left", fill="x", expand=True, padx=(6, 0))
 
+        self.window.update_idletasks()
+        self.window.grab_set()
         self._regenerate()
 
     def _make_checkbox(self, parent, text, variable):
@@ -987,7 +988,6 @@ class AddPasswordDialog:
         self.window.resizable(False, False)
         self.window.configure(fg_color=BG_DARK)
         self.window.transient(parent)
-        self.window.grab_set()
 
         header = ctk.CTkFrame(self.window, height=58, corner_radius=0, fg_color=BG_DARK)
         header.pack(fill="x")
@@ -1089,6 +1089,8 @@ class AddPasswordDialog:
             border_width=0,
         ).pack(side="left", fill="x", expand=True, padx=(6, 0))
 
+        self.window.update_idletasks()
+        self.window.grab_set()
         self.site_entry.focus()
 
     def _update_strength(self):
