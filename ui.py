@@ -2,6 +2,7 @@ import customtkinter as ctk
 
 from encryption import hash_master_password, verify_master_password, generate_salt, derive_key
 from vault import load_vault, save_vault, add_entry, delete_entry, get_entries
+from password_generator import generate_password, calculate_strength
 
 try:
     import pyperclip
@@ -778,11 +779,201 @@ class DashboardWindow:
     def run(self):
         self.window.mainloop()
 
+
+class GeneratorDialog:
+    """Modal dialog for generating a random password with adjustable options."""
+
+    WIDTH = 420
+    HEIGHT = 480
+
+    def __init__(self, parent, on_use):
+        self.on_use = on_use
+        self.current_password = ""
+
+        self.window = ctk.CTkToplevel(parent)
+        self.window.title("Generate Password — PyVault")
+        self.window.geometry(f"{self.WIDTH}x{self.HEIGHT}")
+        self.window.resizable(False, False)
+        self.window.configure(fg_color=BG_DARK)
+        self.window.transient(parent)
+        self.window.grab_set()
+
+        ctk.CTkFrame(self.window, height=2, corner_radius=0, fg_color=HOT_PINK).pack(fill="x", side="top")
+
+        inner = ctk.CTkFrame(self.window, fg_color="transparent")
+        inner.pack(fill="both", expand=True, padx=28, pady=22)
+
+        ctk.CTkLabel(
+            inner, text="Generate password", font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            text_color=TEXT_PRIMARY,
+        ).pack(anchor="w", pady=(0, 16))
+
+        display_row = ctk.CTkFrame(inner, fg_color="transparent")
+        display_row.pack(fill="x", pady=(0, 6))
+
+        self.display_var = ctk.StringVar()
+        self.display_entry = ctk.CTkEntry(
+            display_row, textvariable=self.display_var, state="readonly",
+            height=42, corner_radius=7,
+            fg_color=INPUT_DARK, text_color=TEXT_PRIMARY,
+            border_width=1, border_color=BORDER_DIM,
+            font=ctk.CTkFont(family="Consolas", size=13),
+        )
+        self.display_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        self.copy_button = ctk.CTkButton(
+            display_row, text="Copy", width=64, height=42, corner_radius=7,
+            fg_color="transparent", hover_color=CARD_HOVER,
+            text_color=HOT_PINK, border_width=1, border_color=BORDER_DIM,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            command=self._copy,
+        )
+        self.copy_button.pack(side="left")
+
+        strength_row = ctk.CTkFrame(inner, fg_color="transparent")
+        strength_row.pack(fill="x", pady=(4, 20))
+
+        self.strength_bar = ctk.CTkProgressBar(
+            strength_row, height=6, corner_radius=3,
+            fg_color=BORDER_DIM, progress_color=HOT_PINK,
+        )
+        self.strength_bar.set(0)
+        self.strength_bar.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+        self.strength_label = ctk.CTkLabel(
+            strength_row, text="", font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+            text_color=TEXT_MUTED, width=80, anchor="e",
+        )
+        self.strength_label.pack(side="left")
+
+        length_header = ctk.CTkFrame(inner, fg_color="transparent")
+        length_header.pack(fill="x", pady=(0, 4))
+
+        ctk.CTkLabel(
+            length_header, text="Length", font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=TEXT_SECONDARY,
+        ).pack(side="left")
+
+        self.length_value_label = ctk.CTkLabel(
+            length_header, text="16", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=TEXT_PRIMARY,
+        )
+        self.length_value_label.pack(side="right")
+
+        self.length_slider = ctk.CTkSlider(
+            inner, from_=8, to=32, number_of_steps=24,
+            progress_color=HOT_PINK, button_color=HOT_PINK, button_hover_color=HOT_PINK_HOVER,
+            fg_color=BORDER_DIM,
+            command=self._on_length_change,
+        )
+        self.length_slider.set(16)
+        self.length_slider.pack(fill="x", pady=(0, 16))
+
+        self.upper_var = ctk.BooleanVar(value=True)
+        self.lower_var = ctk.BooleanVar(value=True)
+        self.digits_var = ctk.BooleanVar(value=True)
+        self.symbols_var = ctk.BooleanVar(value=True)
+
+        checkbox_grid = ctk.CTkFrame(inner, fg_color="transparent")
+        checkbox_grid.pack(fill="x", pady=(0, 16))
+
+        self._make_checkbox(checkbox_grid, "Uppercase (A-Z)", self.upper_var).grid(row=0, column=0, sticky="w", pady=3)
+        self._make_checkbox(checkbox_grid, "Lowercase (a-z)", self.lower_var).grid(row=1, column=0, sticky="w", pady=3)
+        self._make_checkbox(checkbox_grid, "Numbers (0-9)", self.digits_var).grid(row=0, column=1, sticky="w", padx=(20, 0), pady=3)
+        self._make_checkbox(checkbox_grid, "Symbols (!@#$)", self.symbols_var).grid(row=1, column=1, sticky="w", padx=(20, 0), pady=3)
+
+        self.error_label = ctk.CTkLabel(
+            inner, text="", font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=ERROR_RED,
+        )
+        self.error_label.pack(anchor="w", pady=(0, 8))
+
+        button_row = ctk.CTkFrame(inner, fg_color="transparent")
+        button_row.pack(fill="x", pady=(4, 0))
+
+        ctk.CTkButton(
+            button_row, text="Regenerate", command=self._regenerate,
+            height=40, corner_radius=7,
+            fg_color="transparent", hover_color=CARD_HOVER,
+            text_color=TEXT_SECONDARY, border_width=1, border_color=BORDER_DIM,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+        ).pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        ctk.CTkButton(
+            button_row, text="Use this password", command=self._use,
+            height=40, corner_radius=7,
+            fg_color=HOT_PINK, hover_color=HOT_PINK_HOVER,
+            text_color=BLACK,
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            border_width=0,
+        ).pack(side="left", fill="x", expand=True, padx=(6, 0))
+
+        self._regenerate()
+
+    def _make_checkbox(self, parent, text, variable):
+        return ctk.CTkCheckBox(
+            parent, text=text, variable=variable, command=self._regenerate,
+            fg_color=HOT_PINK, hover_color=HOT_PINK_HOVER, checkmark_color=BLACK,
+            border_color=BORDER_DIM,
+            text_color=TEXT_SECONDARY,
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+        )
+
+    def _on_length_change(self, value):
+        self.length_value_label.configure(text=str(int(value)))
+        self._regenerate()
+
+    def _regenerate(self):
+        length = int(self.length_slider.get())
+
+        try:
+            password = generate_password(
+                length=length,
+                use_upper=self.upper_var.get(),
+                use_lower=self.lower_var.get(),
+                use_digits=self.digits_var.get(),
+                use_symbols=self.symbols_var.get(),
+            )
+        except ValueError:
+            self.error_label.configure(text="Select at least one character type.")
+            self.display_var.set("")
+            self.strength_bar.set(0)
+            self.strength_label.configure(text="")
+            self.current_password = ""
+            return
+
+        self.error_label.configure(text="")
+        self.current_password = password
+        self.display_var.set(password)
+
+        score, label = calculate_strength(password)
+        self.strength_bar.set(score / 4)
+        colors = {0: ERROR_RED, 1: ERROR_RED, 2: "#ffb347", 3: HOT_PINK, 4: HOT_PINK_HOVER}
+        color = colors.get(score, HOT_PINK)
+        self.strength_bar.configure(progress_color=color)
+        self.strength_label.configure(text=label, text_color=color)
+
+    def _copy(self):
+        if not self.current_password or not HAS_CLIPBOARD:
+            return
+        pyperclip.copy(self.current_password)
+        self.copy_button.configure(text="Copied!")
+        self.window.after(1500, lambda: self.copy_button.configure(text="Copy"))
+
+    def _use(self):
+        if not self.current_password:
+            self.error_label.configure(text="Select at least one character type.")
+            return
+        if self.on_use:
+            self.on_use(self.current_password)
+        self.window.destroy()
+
+
 class AddPasswordDialog:
     """Dialog for adding a new password."""
 
     WIDTH = 430
-    HEIGHT = 470
+    HEIGHT = 540
 
     def __init__(self, parent, vault: dict, key: bytes, vault_path: str, on_saved):
         self.vault = vault
@@ -829,7 +1020,48 @@ class AddPasswordDialog:
 
         self.site_entry = self._make_input(inner, "Website or service")
         self.username_entry = self._make_input(inner, "Username or email")
-        self.password_entry = self._make_input(inner, "Password", show="•")
+
+        # Password field + inline Generate button
+        password_row = ctk.CTkFrame(inner, fg_color="transparent")
+        password_row.pack(fill="x", pady=(0, 4))
+
+        self.password_entry = ctk.CTkEntry(
+            password_row, placeholder_text="Password", placeholder_text_color=TEXT_MUTED,
+            show="•", height=40, corner_radius=7,
+            fg_color=INPUT_DARK, text_color=TEXT_PRIMARY,
+            border_width=1, border_color=BORDER_DIM,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+        )
+        self.password_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.password_entry.bind("<FocusIn>", lambda e: self.password_entry.configure(border_color=HOT_PINK))
+        self.password_entry.bind("<FocusOut>", lambda e: self.password_entry.configure(border_color=BORDER_DIM))
+        self.password_entry.bind("<Return>", lambda e: self._save())
+        self.password_entry.bind("<KeyRelease>", lambda e: self._update_strength())
+
+        ctk.CTkButton(
+            password_row, text="Generate", command=self._open_generator,
+            width=90, height=40, corner_radius=7,
+            fg_color="transparent", hover_color=CARD_HOVER,
+            text_color=HOT_PINK, border_width=1, border_color=HOT_PINK,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+        ).pack(side="left")
+
+        # Strength meter
+        strength_row = ctk.CTkFrame(inner, fg_color="transparent")
+        strength_row.pack(fill="x", pady=(6, 11))
+
+        self.strength_bar = ctk.CTkProgressBar(
+            strength_row, height=6, corner_radius=3,
+            fg_color=BORDER_DIM, progress_color=HOT_PINK,
+        )
+        self.strength_bar.set(0)
+        self.strength_bar.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+        self.strength_label = ctk.CTkLabel(
+            strength_row, text="", font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+            text_color=TEXT_MUTED, width=80, anchor="e",
+        )
+        self.strength_label.pack(side="left")
 
         self.error_label = ctk.CTkLabel(
             inner, text="", font=ctk.CTkFont(family="Segoe UI", size=10),
@@ -858,6 +1090,25 @@ class AddPasswordDialog:
         ).pack(side="left", fill="x", expand=True, padx=(6, 0))
 
         self.site_entry.focus()
+
+    def _update_strength(self):
+        """Recalculate and redraw the strength meter based on the current password field."""
+        password = self.password_entry.get()
+        score, label = calculate_strength(password)
+
+        self.strength_bar.set(score / 4)
+
+        colors = {0: ERROR_RED, 1: ERROR_RED, 2: "#ffb347", 3: HOT_PINK, 4: HOT_PINK_HOVER}
+        self.strength_bar.configure(progress_color=colors.get(score, HOT_PINK))
+        self.strength_label.configure(text=label if password else "", text_color=colors.get(score, TEXT_MUTED))
+
+    def _open_generator(self):
+        GeneratorDialog(self.window, on_use=self._apply_generated_password)
+
+    def _apply_generated_password(self, password: str):
+        self.password_entry.delete(0, "end")
+        self.password_entry.insert(0, password)
+        self._update_strength()
 
     def _make_input(self, parent, placeholder, show=""):
         entry = ctk.CTkEntry(
