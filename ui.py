@@ -1,8 +1,10 @@
 import customtkinter as ctk
+from tkinter import filedialog
 
 from encryption import hash_master_password, verify_master_password, generate_salt, derive_key
 from vault import load_vault, save_vault, add_entry, delete_entry, get_entries
 from password_generator import generate_password, calculate_strength
+from backup import export_backup, import_backup, merge_entries, BackupPasswordError, BackupFormatError
 
 try:
     import pyperclip
@@ -36,7 +38,7 @@ BLACK = "#08080b"
 
 # Auto-lock: how long the dashboard can sit idle before it locks itself
 # and clears the derived key from memory. In milliseconds.
-AUTO_LOCK_MS = 10 * 1000
+AUTO_LOCK_MS = 5 * 60 * 1000  # 5 minutes
 
 
 ctk.set_appearance_mode("dark")
@@ -165,13 +167,125 @@ class ConfirmDialog:
         dialog = ConfirmDialog(parent, title, message, mode="notice", kind=kind)
         parent.wait_window(dialog.window)
 
+
+class ReauthDialog:
+    """
+    A themed modal for re-entering a password (master password re-auth,
+    or the password for an imported backup). Matches ConfirmDialog's look.
+
+    Use ReauthDialog.ask(parent, title, message) -> str | None
+    Returns the entered password, or None if the user cancelled.
+    """
+
+    WIDTH = 380
+
+    def __init__(self, parent, title: str, message: str):
+        self.result = None
+
+        self.window = ctk.CTkToplevel(parent)
+        self.window.title(title)
+        self.window.resizable(False, False)
+        self.window.configure(fg_color=BG_DARK)
+        self.window.transient(parent)
+        self.window.protocol("WM_DELETE_WINDOW", self._on_cancel)
+
+        ctk.CTkFrame(self.window, height=2, corner_radius=0, fg_color=HOT_PINK).pack(fill="x", side="top")
+
+        inner = ctk.CTkFrame(self.window, fg_color="transparent")
+        inner.pack(fill="both", expand=True, padx=26, pady=22)
+
+        ctk.CTkLabel(
+            inner, text=title,
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text_color=TEXT_PRIMARY,
+        ).pack(anchor="w", pady=(0, 6))
+
+        ctk.CTkLabel(
+            inner, text=message,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=TEXT_SECONDARY,
+            wraplength=self.WIDTH - 60, justify="left",
+        ).pack(anchor="w", pady=(0, 14))
+
+        self.password_entry = ctk.CTkEntry(
+            inner, placeholder_text="Master password", placeholder_text_color=TEXT_MUTED,
+            show="•", height=40, corner_radius=7,
+            fg_color=INPUT_DARK, text_color=TEXT_PRIMARY,
+            border_width=1, border_color=BORDER_DIM,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+        )
+        self.password_entry.pack(fill="x", pady=(0, 20))
+        self.password_entry.bind("<FocusIn>", lambda e: self.password_entry.configure(border_color=HOT_PINK))
+        self.password_entry.bind("<FocusOut>", lambda e: self.password_entry.configure(border_color=BORDER_DIM))
+        self.password_entry.bind("<Return>", lambda e: self._on_confirm())
+
+        button_row = ctk.CTkFrame(inner, fg_color="transparent")
+        button_row.pack(fill="x")
+
+        ctk.CTkButton(
+            button_row, text="Cancel", command=self._on_cancel,
+            height=38, corner_radius=7,
+            fg_color="transparent", hover_color=CARD_HOVER,
+            text_color=TEXT_SECONDARY, border_width=1, border_color=BORDER_DIM,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+        ).pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        ctk.CTkButton(
+            button_row, text="Confirm", command=self._on_confirm,
+            height=38, corner_radius=7,
+            fg_color=HOT_PINK, hover_color=HOT_PINK_HOVER,
+            text_color=BLACK,
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            border_width=0,
+        ).pack(side="left", fill="x", expand=True, padx=(6, 0))
+
+        self.window.update_idletasks()
+        self._center_on_parent(parent)
+        self.window.grab_set()
+        self.password_entry.focus()
+
+    def _center_on_parent(self, parent):
+        self.window.update_idletasks()
+        w = self.window.winfo_width()
+        h = self.window.winfo_height()
+        px = parent.winfo_rootx()
+        py = parent.winfo_rooty()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        x = px + (pw - w) // 2
+        y = py + (ph - h) // 2
+        self.window.geometry(f"+{x}+{y}")
+
+    def _on_confirm(self):
+        self.result = self.password_entry.get()
+        self.window.grab_release()
+        self.window.destroy()
+
+    def _on_cancel(self):
+        self.result = None
+        self.window.grab_release()
+        self.window.destroy()
+
+    @staticmethod
+    def ask(parent, title: str, message: str) -> str | None:
+        """Show the dialog and block until the user confirms or cancels.
+
+        Returns the entered password string, or None if cancelled.
+        An empty string is a valid (if useless) return — cancellation
+        is the only case that returns None.
+        """
+        dialog = ReauthDialog(parent, title, message)
+        parent.wait_window(dialog.window)
+        return dialog.result
+
+
 class LoginWindow:
     """Login / first-time setup screen."""
 
     WIDTH = 520
     HEIGHT = 600
 
-    def __init__(self, vault_path: str = "vault.json"):
+    def __init__(self, vault_path: str = "vault.db"):
         self.vault_path = vault_path
         self.vault = load_vault(vault_path)
         self.key = None
@@ -389,7 +503,7 @@ class DashboardWindow:
     WIDTH = 900
     HEIGHT = 650
 
-    def __init__(self, vault: dict, key: bytes, vault_path: str = "vault.json"):
+    def __init__(self, vault: dict, key: bytes, vault_path: str = "vault.db"):
         self.vault = vault
         self.key = key
         self.vault_path = vault_path
@@ -407,6 +521,7 @@ class DashboardWindow:
         self.window.minsize(760, 520)
         self.window.configure(fg_color=BG_DARK)
 
+        self._create_menu_bar()
         self._create_header()
         self._create_body()
         self._create_sidebar()
@@ -421,6 +536,105 @@ class DashboardWindow:
         self._reset_inactivity_timer()
 
         self._refresh_list()
+
+    def _create_menu_bar(self):
+        """Native Tk menu bar — CTk windows are still Tk roots underneath,
+        so the standard tkinter Menu widget attaches fine. CTk doesn't
+        theme this (it's OS-drawn chrome), which is an accepted trade-off
+        for using the platform's native menu instead of a custom one.
+        """
+        import tkinter as tk
+
+        menu_bar = tk.Menu(self.window)
+
+        file_menu = tk.Menu(menu_bar, tearoff=0)
+        file_menu.add_command(label="Export vault...", command=self._export_vault)
+        file_menu.add_command(label="Import vault...", command=self._import_vault)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self._exit)
+
+        menu_bar.add_cascade(label="File", menu=file_menu)
+        self.window.config(menu=menu_bar)
+
+    def _export_vault(self):
+        """Re-authenticate, warn about what the backup contains, then write it."""
+        confirmed_password = ReauthDialog.ask(
+            self.window,
+            "Confirm export",
+            "Re-enter your master password to export an encrypted backup.",
+        )
+        if confirmed_password is None:
+            return
+
+        stored_hash = self.vault["hash"].encode()
+        if not verify_master_password(confirmed_password, stored_hash):
+            self._show_toast("Export cancelled", "Incorrect master password.", error=True)
+            return
+
+        proceed = ConfirmDialog.ask(
+            self.window,
+            "Export encrypted backup",
+            "This backup is encrypted and tied to your master password. "
+            "Anyone with this file AND your master password can access your vault — "
+            "store it somewhere safe. Continue?",
+        )
+        if not proceed:
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            parent=self.window,
+            title="Export vault backup",
+            defaultextension=".vaultbak",
+            filetypes=[("PyVault backup", "*.vaultbak"), ("All files", "*.*")],
+        )
+        if not file_path:
+            return
+
+        try:
+            count = export_backup(self.vault, self.key, file_path)
+        except Exception:
+            self._show_toast("Export failed", "Could not write the backup file.", error=True)
+            return
+
+        self._show_toast(
+            "Backup exported",
+            f"Exported {count} password{'s' if count != 1 else ''} to {file_path}.",
+        )
+
+    def _import_vault(self):
+        file_path = filedialog.askopenfilename(
+            parent=self.window,
+            title="Import vault backup",
+            filetypes=[("PyVault backup", "*.vaultbak"), ("All files", "*.*")],
+        )
+        if not file_path:
+            return
+
+        backup_password = ReauthDialog.ask(
+            self.window,
+            "Unlock backup",
+            "Enter the master password that was used to create this backup.",
+        )
+        if backup_password is None:
+            return
+
+        try:
+            imported_entries = import_backup(file_path, backup_password)
+        except BackupPasswordError:
+            self._show_toast("Import failed", "Incorrect password for this backup.", error=True)
+            return
+        except BackupFormatError as exc:
+            self._show_toast("Import failed", str(exc), error=True)
+            return
+
+        self.vault, added, skipped = merge_entries(self.vault, self.key, imported_entries)
+        save_vault(self.vault, self.vault_path)
+        self._refresh_list()
+
+        summary = f"Added {added} new password{'s' if added != 1 else ''}."
+        if skipped:
+            summary += f" Skipped {skipped} already in your vault."
+        self._show_toast("Import complete", summary)
 
     def _create_header(self):
         header = ctk.CTkFrame(self.window, height=58, corner_radius=0, fg_color=BG_DARK)
@@ -1221,9 +1435,9 @@ class AddPasswordDialog:
 
 
 if __name__ == "__main__":
-    login = LoginWindow("vault.json")
+    login = LoginWindow("vault.db")
     login.run()
 
     if login.key is not None:
-        dashboard = DashboardWindow(login.vault, login.key, "vault.json")
+        dashboard = DashboardWindow(login.vault, login.key, "vault.db")
         dashboard.run()
