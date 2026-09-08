@@ -14,3 +14,4 @@ pytest-cov==7.1.0      # Coverage reporting
 
 # GUI
 customtkinter==5.2.2
+

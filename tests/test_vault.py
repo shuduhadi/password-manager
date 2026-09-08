@@ -1,5 +1,5 @@
 import pytest
-import json
+import sqlite3
 from cryptography.fernet import InvalidToken
 from vault import load_vault, save_vault, add_entry, delete_entry, get_entries
 
@@ -126,17 +126,19 @@ def test_get_entries_with_wrong_key_raises(tmp_vault, salt):
         get_entries(reloaded, key2)
 
 
-def test_vault_file_is_valid_json(tmp_vault, key):
-    """Saved vault file should be valid JSON."""
+def test_vault_file_is_valid_sqlite_db(tmp_vault, key):
+    """Saved vault should be a valid, readable SQLite database."""
     vault = load_vault(str(tmp_vault))
     vault["salt"] = "test_salt"
     vault = add_entry(vault, "site", "user", "pass", key)
-    
+
     save_vault(vault, str(tmp_vault))
-    
-    # Read raw JSON to verify it's valid
-    with open(tmp_vault) as f:
-        parsed = json.load(f)
-    
-    assert parsed["salt"] == "test_salt"
-    assert len(parsed["entries"]) == 1
+
+    # Read directly via sqlite3 to verify it's a valid db, independent of vault.py
+    conn = sqlite3.connect(str(tmp_vault))
+    salt_row = conn.execute("SELECT salt FROM meta WHERE id = 1").fetchone()
+    entry_count = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+    conn.close()
+
+    assert salt_row[0] == "test_salt"
+    assert entry_count == 1

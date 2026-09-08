@@ -7,7 +7,7 @@ or the OS window-close button) ends the loop normally.
 """
 from ui import LoginWindow, DashboardWindow
 
-VAULT_PATH = "vault.json"
+VAULT_PATH = "vault.db"
 
 
 def main():
