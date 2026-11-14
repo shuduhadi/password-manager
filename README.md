@@ -1,5 +1,7 @@
 # 🔐 PyVault — local encrypted password manager
 
+[![Tests](https://github.com/shuduhadi/password-manager/actions/workflows/tests.yml/badge.svg)](https://github.com/shuduhadi/password-manager/actions/workflows/tests.yml)
+
 > A Python desktop app for securely storing and managing passwords.
 > All credentials are encrypted with AES-128 and never stored in plaintext.
 
